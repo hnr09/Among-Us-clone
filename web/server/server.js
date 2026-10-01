@@ -5,6 +5,8 @@ const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 4321;
 const CLIENT_ROOT = path.resolve(__dirname, "../client");
+const REPO_ROOT = path.resolve(__dirname, "../..");
+const MAP_ROOT = path.resolve(REPO_ROOT, "Assets/Maps");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -18,6 +20,41 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml",
   ".webp": "image/webp"
 };
+
+function serveMapFile(req, res) {
+  const requestPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  const mapFile = requestPath.replace(/^\/assets\/maps\//, "");
+  const filePath = path.resolve(MAP_ROOT, mapFile);
+
+  if (filePath !== MAP_ROOT && !filePath.startsWith(MAP_ROOT + path.sep)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return true;
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    }
+
+    const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+
+    fs.readFile(filePath, (readError, data) => {
+      if (readError) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Internal server error");
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": contentType });
+      res.end(data);
+    });
+  });
+
+  return true;
+}
 
 function serveClientFile(req, res) {
   let requestPath = decodeURIComponent((req.url || "/").split("?")[0]);
@@ -60,6 +97,10 @@ const httpServer = http.createServer((req, res) => {
   // Socket.IO handles its own /socket.io/* requests.
   if ((req.url || "").startsWith("/socket.io/")) {
     return;
+  }
+
+  if ((req.url || "").split("?")[0].startsWith("/assets/maps/")) {
+    return serveMapFile(req, res);
   }
 
   if ((req.url || "").split("?")[0] === "/health") {
