@@ -1,0 +1,13 @@
+{
+  "name": "among-us-web-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web transport server for the original Among Us clone",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  }
+}
