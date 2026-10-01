@@ -1,11 +1,74 @@
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 4321;
+const CLIENT_ROOT = path.resolve(__dirname, "../client");
+
+const MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp"
+};
+
+function serveClientFile(req, res) {
+  let requestPath = decodeURIComponent((req.url || "/").split("?")[0]);
+
+  if (requestPath === "/") {
+    requestPath = "/index.html";
+  }
+
+  const filePath = path.resolve(CLIENT_ROOT, "." + requestPath);
+
+  if (filePath !== CLIENT_ROOT && !filePath.startsWith(CLIENT_ROOT + path.sep)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    }
+
+    const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+
+    fs.readFile(filePath, (readError, data) => {
+      if (readError) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Internal server error");
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": contentType });
+      res.end(data);
+    });
+  });
+}
 
 const httpServer = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("Among Us web server is running.");
+  // Socket.IO handles its own /socket.io/* requests.
+  if ((req.url || "").startsWith("/socket.io/")) {
+    return;
+  }
+
+  if ((req.url || "").split("?")[0] === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Among Us web server is running.");
+    return;
+  }
+
+  serveClientFile(req, res);
 });
 
 const io = new Server(httpServer, {
@@ -123,8 +186,6 @@ io.on("connection", (socket) => {
   playerId = Number(playerId);
   minionmap.set(playerId, makeMinion(playerId));
 
-  // Equivalent to server.py:
-  // conn.send(pickle.dumps(['id update', player_id]))
   socket.emit("server message", ["id update", playerId]);
 
   socket.on("world update", (message) => {
@@ -132,7 +193,6 @@ io.on("connection", (socket) => {
     io.emit("world update", publicWorldState());
   });
 
-  // Also accept an object form so the browser client can be easier to debug.
   socket.on("world_update", (message) => {
     if (Array.isArray(message)) {
       applyWorldUpdate(message);
