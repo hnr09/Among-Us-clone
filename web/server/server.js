@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 4321;
 const CLIENT_ROOT = path.resolve(__dirname, "../client");
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const MAP_ROOT = path.resolve(REPO_ROOT, "Assets/Maps");
+const IMAGE_ROOT = path.resolve(REPO_ROOT, "Assets/Images");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -48,6 +49,39 @@ function serveMapFile(req, res) {
         return;
       }
 
+      res.writeHead(200, { "Content-Type": contentType });
+      res.end(data);
+    });
+  });
+
+  return true;
+}
+
+function serveImageFile(req, res) {
+  const requestPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  const imageFile = requestPath.replace(/^\/assets\/images\//, "");
+  const filePath = path.resolve(IMAGE_ROOT, imageFile);
+
+  if (filePath !== IMAGE_ROOT && !filePath.startsWith(IMAGE_ROOT + path.sep)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return true;
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    }
+
+    const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+    fs.readFile(filePath, (readError, data) => {
+      if (readError) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Internal server error");
+        return;
+      }
       res.writeHead(200, { "Content-Type": contentType });
       res.end(data);
     });
@@ -101,6 +135,10 @@ const httpServer = http.createServer((req, res) => {
 
   if ((req.url || "").split("?")[0].startsWith("/assets/maps/")) {
     return serveMapFile(req, res);
+  }
+
+  if ((req.url || "").split("?")[0].startsWith("/assets/images/")) {
+    return serveImageFile(req, res);
   }
 
   if ((req.url || "").split("?")[0] === "/health") {
