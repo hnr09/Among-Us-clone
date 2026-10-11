@@ -157,12 +157,16 @@ const io = new Server(httpServer, {
 // This is the web equivalent of the state held in server.py's minionmap.
 // The field names intentionally follow the original server.py protocol.
 const minionmap = new Map();
+const SPAWN_POSITIONS = [
+  [3288, 873], [3046, 791], [3046, 651], [3563, 653],
+  [3563, 762], [2968, 530], [3566, 553]
+];
 
-function makeMinion(playerId) {
+function makeMinion(playerId, spawn) {
   return {
     player_id: playerId,
-    x: 50,
-    y: 50,
+    x: spawn[0],
+    y: spawn[1],
     sync_img: null,
     sync_img_index: null,
     left_img_index: 0,
@@ -263,9 +267,10 @@ io.on("connection", (socket) => {
   } while (minionmap.has(playerId));
 
   playerId = Number(playerId);
-  minionmap.set(playerId, makeMinion(playerId));
+  const spawn = SPAWN_POSITIONS[minionmap.size % SPAWN_POSITIONS.length];
+  minionmap.set(playerId, makeMinion(playerId, spawn));
 
-  socket.emit("server message", ["id update", playerId]);
+  socket.emit("server message", ["id update", playerId, spawn[0], spawn[1]]);
 
   socket.on("world update", (message) => {
     applyWorldUpdate(message);
