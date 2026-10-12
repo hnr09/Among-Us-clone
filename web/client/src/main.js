@@ -253,7 +253,7 @@ function ensurePlayer(scene, id, x, y, color, local) {
         // top-left coordinates instead of a custom centered 28x40 hitbox.
         player.setOrigin(0, 0);
         // Render the source frames at half size to match the original 32 px map tiles.
-        player.setScale(0.5);
+        player.setScale(0.75);
         player.setDepth(y);
         player.playerId = id;
         player.playerColor = initialColor;
