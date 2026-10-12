@@ -113,7 +113,7 @@ function create() {
             const startX = Number.isFinite(x) && x > 0 ? x : SPAWN_FALLBACK[0];
             const startY = Number.isFinite(y) && y > 0 ? y : SPAWN_FALLBACK[1];
             ensurePlayer(this, playerId, startX, startY, colorForId(playerId), true);
-            this.cameras.main.startFollow(this.players.get(playerId), true, 0.12, 0.12);
+            this.cameras.main.startFollow(this.players.get(playerId), true, 1, 1);
             updateStatus(this);
         }
     });
@@ -161,43 +161,57 @@ function update(time, delta) {
     if (this.keys.up.isDown || this.keys.arrowUp.isDown) dy -= 1;
     if (this.keys.down.isDown || this.keys.arrowDown.isDown) dy += 1;
 
-    const moving = dx !== 0 || dy !== 0;
-    if (moving) {
+    const hasInput = dx !== 0 || dy !== 0;
+    let didMove = false;
+
+    if (hasInput) {
         const length = Math.hypot(dx, dy);
         dx /= length;
         dy /= length;
 
-        if (Math.abs(dx) > Math.abs(dy)) {
+        // Match the original game's diagonal-facing behavior: horizontal wins
+        // ties, so diagonal input does not make the character flicker vertically.
+        if (Math.abs(dx) >= Math.abs(dy) && dx !== 0) {
             this.lastDirection = dx < 0 ? "left" : "right";
-        } else {
+        } else if (dy !== 0) {
             this.lastDirection = dy < 0 ? "up" : "down";
         }
 
-        const distance = PLAYER_SPEED * (Math.min(delta, 50) / 1000);
-        // Sweep movement in small steps to prevent tunneling through thin
-        // original TMX colliders at high speed or during a slow browser frame.
-        // Resolve each axis separately so the player can still slide along walls.
+        // Keep the original PLAYER_SPEED (400), but clamp long frame times so
+        // a lag spike cannot teleport the player through a wall.
+        const distance = PLAYER_SPEED * (Math.min(Math.max(delta, 0), 50) / 1000);
         const moveX = dx * distance;
         const moveY = dy * distance;
-        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(moveX), Math.abs(moveY)) / 4));
+        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(moveX), Math.abs(moveY)) / 3));
         const stepX = moveX / steps;
         const stepY = moveY / steps;
 
+        // Resolve axes separately to preserve sliding along walls.
         for (let i = 0; i < steps; i++) {
-            const nextX = player.x + stepX;
-            if (stepX !== 0 && !hitsObstacle(this, nextX, player.y)) {
-                player.x = nextX;
+            if (stepX !== 0) {
+                const nextX = player.x + stepX;
+                if (!hitsObstacle(this, nextX, player.y)) {
+                    player.x = nextX;
+                    didMove = true;
+                }
             }
 
-            const nextY = player.y + stepY;
-            if (stepY !== 0 && !hitsObstacle(this, player.x, nextY)) {
-                player.y = nextY;
+            if (stepY !== 0) {
+                const nextY = player.y + stepY;
+                if (!hitsObstacle(this, player.x, nextY)) {
+                    player.y = nextY;
+                    didMove = true;
+                }
             }
         }
+    }
 
-        this.animationElapsed += delta;
-        if (this.animationElapsed >= 95) {
-            this.animationElapsed = 0;
+    // Advance frames only while the character is actually moving. Retain the
+    // remainder so animation speed stays consistent across different FPS.
+    if (didMove) {
+        this.animationElapsed += Math.min(Math.max(delta, 0), 50);
+        while (this.animationElapsed >= 95) {
+            this.animationElapsed -= 95;
             this.animationFrame = (this.animationFrame + 1) % FRAME_NUMBERS.length;
         }
     } else {
@@ -205,7 +219,7 @@ function update(time, delta) {
         this.animationElapsed = 0;
     }
 
-    player.setTexture(textureKey(player.playerColor, this.lastDirection, moving ? this.animationFrame : 0));
+    player.setTexture(textureKey(player.playerColor, this.lastDirection, this.animationFrame));
     player.setDepth(player.y);
 
     if (socket && socket.connected && time - lastSentAt >= 50) {
@@ -275,19 +289,16 @@ async function loadOriginalMapColliders(scene) {
         const obstaclesGroup = groups.find((group) => group.getAttribute("name") === "Obstacles");
         if (!obstaclesGroup) throw new Error('TMX object group "Obstacles" was not found');
 
-        // Keep the original TMX map. Include singular "wall" and unnamed
-        // rectangle objects too; these were omitted by the first web port.
-        // Include named machinery from the original TMX too. These objects are not
-        // named "walls", but the generator/engine/reactor artwork should block movement.
+        // Match the obstacle names used by the original Python game.py.
+        // Unnamed TMX objects are task/spawn/interaction markers, not walls;
+        // treating them as solid creates invisible barriers in the web port.
         const solidNames = new Set([
-            "walls", "wall", "tables", "props",
-            "generator", "generator_circuit", "engines", "reactor"
+            "walls", "wall", "tables", "props", "generator",
+            "medbay_comp", "engines", "reactor", "security_room_comp",
+            "admin_btn1", "admin_btn2"
         ]);
         scene.obstacles = Array.from(obstaclesGroup.getElementsByTagName("object"))
-            .filter((object) => {
-                const name = (object.getAttribute("name") || "").toLowerCase();
-                return name === "" || solidNames.has(name);
-            })
+            .filter((object) => solidNames.has((object.getAttribute("name") || "").toLowerCase()))
             .map((object) => ({
                 x: Number(object.getAttribute("x") || 0),
                 y: Number(object.getAttribute("y") || 0),
