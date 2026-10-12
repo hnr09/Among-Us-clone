@@ -57,7 +57,7 @@ function preload() {
 }
 
 function create() {
-    this.mapImage = this.add.image(0, 0, "map").setOrigin(0, 0);
+    this.mapImage = this.add.image(0, 0, "map").setOrigin(0, 0).setDepth(-1);
     this.physics.world.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
     this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
 
@@ -80,7 +80,7 @@ function create() {
         backgroundColor: "rgba(0, 0, 0, 0.72)",
         padding: { left: 10, right: 10, top: 7, bottom: 7 },
         lineSpacing: 3
-    }).setScrollFactor(0).setDepth(1000);
+    }).setScrollFactor(0).setDepth(100000);
 
     this.helpText = this.add.text(18, 112, "이동: WASD / 방향키", {
         fontFamily: "Arial",
@@ -88,7 +88,7 @@ function create() {
         color: "#ffffff",
         backgroundColor: "rgba(0, 0, 0, 0.55)",
         padding: { left: 8, right: 8, top: 5, bottom: 5 }
-    }).setScrollFactor(0).setDepth(1000);
+    }).setScrollFactor(0).setDepth(100000);
 
     updateStatus(this);
     loadOriginalMapColliders(this);
@@ -133,6 +133,7 @@ function create() {
             const color = COLORS.includes(row[10]) ? row[10] : colorForId(id);
             const player = ensurePlayer(this, id, x, y, color, false);
             player.setPosition(x, y);
+            player.setDepth(y + PLAYER_SCALE_HEIGHT * (1 - 0.62));
             player.playerAlive = row[3] !== false;
             player.setAlpha(player.playerAlive ? 1 : 0.45);
         }
@@ -220,7 +221,8 @@ function update(time, delta) {
     }
 
     player.setTexture(textureKey(player.playerColor, this.lastDirection, this.animationFrame));
-    player.setDepth(player.y);
+    // Sort by the feet, not the sprite center, for correct top-down depth.
+    player.setDepth(player.y + PLAYER_SCALE_HEIGHT * (1 - 0.62));
 
     if (socket && socket.connected && time - lastSentAt >= 50) {
         lastSentAt = time;
@@ -297,15 +299,32 @@ async function loadOriginalMapColliders(scene) {
             "medbay_comp", "engines", "reactor", "security_room_comp",
             "admin_btn1", "admin_btn2"
         ]);
-        scene.obstacles = Array.from(obstaclesGroup.getElementsByTagName("object"))
+        const solidObjects = Array.from(obstaclesGroup.getElementsByTagName("object"))
             .filter((object) => solidNames.has((object.getAttribute("name") || "").toLowerCase()))
             .map((object) => ({
+                id: Number(object.getAttribute("id") || 0),
+                name: (object.getAttribute("name") || "").toLowerCase(),
                 x: Number(object.getAttribute("x") || 0),
                 y: Number(object.getAttribute("y") || 0),
                 width: Number(object.getAttribute("width") || 0),
                 height: Number(object.getAttribute("height") || 0)
             }))
             .filter((rect) => rect.width > 0 && rect.height > 0);
+
+        scene.obstacles = solidObjects.map(({ x, y, width, height }) => ({ x, y, width, height }));
+
+        // The original map PNG is flattened, while TMX Props/Walls tile layers
+        // are empty. Reuse pixels from that exact map image as thin horizontal
+        // slices inside the original solid-object rectangles. Sorting each slice
+        // by its lower edge lets objects cover characters behind them without
+        // changing the map art or the collision rectangles.
+        try {
+            scene.occlusionCount = createOcclusionSlices(scene, solidObjects);
+        } catch (occlusionError) {
+            console.error("Could not create map object occlusion slices:", occlusionError);
+            scene.occlusionError = true;
+            scene.occlusionCount = 0;
+        }
 
         scene.collidersReady = true;
         updateStatus(scene);
@@ -314,6 +333,53 @@ async function loadOriginalMapColliders(scene) {
         scene.collisionError = true;
         updateStatus(scene);
     }
+}
+
+function createOcclusionSlices(scene, objects) {
+    const source = scene.textures.get("map").getSourceImage();
+    if (!source) throw new Error("Original map image is unavailable");
+
+    let sliceCount = 0;
+    const sliceHeight = 32;
+
+    for (const object of objects) {
+        const x = object.x;
+        const y = object.y;
+        const width = object.width;
+        const height = object.height;
+        const canvasWidth = Math.max(1, Math.ceil(width));
+
+        // One slice per tile-height band means a tall wall can be behind a
+        // character near its top and in front of the same character near its base.
+        for (let offsetY = 0, band = 0; offsetY < height; offsetY += sliceHeight, band++) {
+            const bandHeight = Math.min(sliceHeight, height - offsetY);
+            const canvasHeight = Math.max(1, Math.ceil(bandHeight));
+            const key = "map-occlusion-" + object.id + "-" + band;
+
+            if (scene.textures.exists(key)) continue;
+
+            const texture = scene.textures.createCanvas(key, canvasWidth, canvasHeight);
+            if (!texture) continue;
+
+            const context = texture.getContext();
+            context.clearRect(0, 0, canvasWidth, canvasHeight);
+            context.drawImage(
+                source,
+                x, y + offsetY, width, bandHeight,
+                0, 0, width, bandHeight
+            );
+            texture.refresh();
+
+            scene.add.image(x, y + offsetY, key)
+                .setOrigin(0, 0)
+                .setDisplaySize(width, bandHeight)
+                .setDepth(y + offsetY + bandHeight + 0.01);
+
+            sliceCount++;
+        }
+    }
+
+    return sliceCount;
 }
 
 function hitsObstacle(scene, x, y) {
