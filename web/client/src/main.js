@@ -192,9 +192,9 @@ function update(time, delta) {
 
         if (moveX !== 0) {
             player.x += moveX;
-            const hitX = firstOverlappingObstacle(this, player.x, player.y, player.body.width, player.body.height);
+            const hitX = firstOverlappingObstacle(this, player.x, player.y, player.displayWidth, player.displayHeight);
             if (hitX) {
-                if (moveX > 0) player.x = hitX.x - player.body.width;
+                if (moveX > 0) player.x = hitX.x - player.displayWidth;
                 else player.x = hitX.x + hitX.width;
             }
             didMove = true;
@@ -204,7 +204,7 @@ function update(time, delta) {
             player.y += moveY;
             const hitY = firstOverlappingObstacle(this, player.x, player.y);
             if (hitY) {
-                if (moveY > 0) player.y = hitY.y - player.body.height;
+                if (moveY > 0) player.y = hitY.y - player.displayHeight;
                 else player.y = hitY.y + hitY.height;
             }
             didMove = true;
@@ -226,7 +226,7 @@ function update(time, delta) {
 
     player.setTexture(textureKey(player.playerColor, this.lastDirection, this.animationFrame));
     // Sort by the feet, not the sprite center, for correct top-down depth.
-    player.setDepth(player.y + player.body.height);
+    player.setDepth(player.y + player.displayHeight);
 
     if (socket && socket.connected && time - lastSentAt >= 50) {
         lastSentAt = time;
@@ -252,6 +252,8 @@ function ensurePlayer(scene, id, x, y, color, local) {
         // pos as the rectangle's top-left, so keep native PNG dimensions and
         // top-left coordinates instead of a custom centered 28x40 hitbox.
         player.setOrigin(0, 0);
+        // Render the source frames at half size to match the original 32 px map tiles.
+        player.setScale(0.5);
         player.setDepth(y);
         player.playerId = id;
         player.playerColor = initialColor;
@@ -346,9 +348,9 @@ function renderCollisionDebug(scene) {
     const player = playerId !== null && scene.players ? scene.players.get(playerId) : null;
     if (player) {
         graphics.lineStyle(2, 0x00e5ff, 1);
-        graphics.strokeRect(player.x, player.y, player.body.width, player.body.height);
+        graphics.strokeRect(player.x, player.y, player.displayWidth, player.displayHeight);
         graphics.fillStyle(0x00e5ff, 0.12);
-        graphics.fillRect(player.x, player.y, player.body.width, player.body.height);
+        graphics.fillRect(player.x, player.y, player.displayWidth, player.displayHeight);
     }
 }
 
