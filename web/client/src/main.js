@@ -134,7 +134,7 @@ function create() {
             const color = COLORS.includes(row[10]) ? row[10] : colorForId(id);
             const player = ensurePlayer(this, id, x, y, color, false);
             player.setPosition(x, y);
-            player.setDepth(y + player.body.height);
+            player.setDepth(y + player.displayHeight);
             player.playerAlive = row[3] !== false;
             player.setAlpha(player.playerAlive ? 1 : 0.45);
         }
@@ -191,22 +191,12 @@ function update(time, delta) {
         const moveY = dy * distance;
 
         if (moveX !== 0) {
-            player.x += moveX;
-            const hitX = firstOverlappingObstacle(this, player.x, player.y, player.displayWidth, player.displayHeight);
-            if (hitX) {
-                if (moveX > 0) player.x = hitX.x - player.displayWidth;
-                else player.x = hitX.x + hitX.width;
-            }
+            movePlayerAxis(this, player, moveX, "x");
             didMove = true;
         }
 
         if (moveY !== 0) {
-            player.y += moveY;
-            const hitY = firstOverlappingObstacle(this, player.x, player.y);
-            if (hitY) {
-                if (moveY > 0) player.y = hitY.y - player.displayHeight;
-                else player.y = hitY.y + hitY.height;
-            }
+            movePlayerAxis(this, player, moveY, "y");
             didMove = true;
         }
     }
@@ -352,6 +342,66 @@ function renderCollisionDebug(scene) {
         graphics.fillStyle(0x00e5ff, 0.12);
         graphics.fillRect(player.x, player.y, player.displayWidth, player.displayHeight);
     }
+}
+
+function movePlayerAxis(scene, player, amount, axis) {
+    // Sweep from the previous position to the next position. This prevents
+    // snapping to the far side of a wall when a frame begins overlapped or
+    // moves far enough to cross an obstacle in one update.
+    const width = player.displayWidth;
+    const height = player.displayHeight;
+    const previous = axis === "x" ? player.x : player.y;
+    const next = previous + amount;
+    let resolved = next;
+
+    for (const rect of scene.obstacles || []) {
+        if (axis === "x") {
+            const overlapsY = player.y + height > rect.y && player.y < rect.y + rect.height;
+            if (!overlapsY) continue;
+
+            if (amount > 0) {
+                const oldRight = previous + width;
+                const newRight = next + width;
+                if (oldRight <= rect.x && newRight > rect.x) {
+                    resolved = Math.min(resolved, rect.x - width);
+                } else if (previous < rect.x + rect.width && oldRight > rect.x) {
+                    resolved = previous;
+                }
+            } else {
+                const oldLeft = previous;
+                const newLeft = next;
+                if (oldLeft >= rect.x + rect.width && newLeft < rect.x + rect.width) {
+                    resolved = Math.max(resolved, rect.x + rect.width);
+                } else if (oldLeft < rect.x + rect.width && oldLeft + width > rect.x) {
+                    resolved = previous;
+                }
+            }
+        } else {
+            const overlapsX = player.x + width > rect.x && player.x < rect.x + rect.width;
+            if (!overlapsX) continue;
+
+            if (amount > 0) {
+                const oldBottom = previous + height;
+                const newBottom = next + height;
+                if (oldBottom <= rect.y && newBottom > rect.y) {
+                    resolved = Math.min(resolved, rect.y - height);
+                } else if (previous < rect.y + rect.height && oldBottom > rect.y) {
+                    resolved = previous;
+                }
+            } else {
+                const oldTop = previous;
+                const newTop = next;
+                if (oldTop >= rect.y + rect.height && newTop < rect.y + rect.height) {
+                    resolved = Math.max(resolved, rect.y + rect.height);
+                } else if (oldTop < rect.y + rect.height && oldTop + height > rect.y) {
+                    resolved = previous;
+                }
+            }
+        }
+    }
+
+    if (axis === "x") player.x = resolved;
+    else player.y = resolved;
 }
 
 function firstOverlappingObstacle(scene, x, y, width, height) {
