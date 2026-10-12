@@ -260,9 +260,14 @@ async function loadOriginalMapColliders(scene) {
         const obstaclesGroup = groups.find((group) => group.getAttribute("name") === "Obstacles");
         if (!obstaclesGroup) throw new Error('TMX object group "Obstacles" was not found');
 
-        const solidNames = new Set(["walls", "tables", "props"]);
+        // Keep the original TMX map. Include singular "wall" and unnamed
+        // rectangle objects too; these were omitted by the first web port.
+        const solidNames = new Set(["walls", "wall", "tables", "props"]);
         scene.obstacles = Array.from(obstaclesGroup.getElementsByTagName("object"))
-            .filter((object) => solidNames.has((object.getAttribute("name") || "").toLowerCase()))
+            .filter((object) => {
+                const name = (object.getAttribute("name") || "").toLowerCase();
+                return name === "" || solidNames.has(name);
+            })
             .map((object) => ({
                 x: Number(object.getAttribute("x") || 0),
                 y: Number(object.getAttribute("y") || 0),
