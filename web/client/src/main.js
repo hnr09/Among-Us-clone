@@ -174,11 +174,26 @@ function update(time, delta) {
         }
 
         const distance = PLAYER_SPEED * (Math.min(delta, 50) / 1000);
-        // Resolve axes separately so the player can slide along walls.
-        const nextX = player.x + dx * distance;
-        if (!hitsObstacle(this, nextX, player.y)) player.x = nextX;
-        const nextY = player.y + dy * distance;
-        if (!hitsObstacle(this, player.x, nextY)) player.y = nextY;
+        // Sweep movement in small steps to prevent tunneling through thin
+        // original TMX colliders at high speed or during a slow browser frame.
+        // Resolve each axis separately so the player can still slide along walls.
+        const moveX = dx * distance;
+        const moveY = dy * distance;
+        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(moveX), Math.abs(moveY)) / 4));
+        const stepX = moveX / steps;
+        const stepY = moveY / steps;
+
+        for (let i = 0; i < steps; i++) {
+            const nextX = player.x + stepX;
+            if (stepX !== 0 && !hitsObstacle(this, nextX, player.y)) {
+                player.x = nextX;
+            }
+
+            const nextY = player.y + stepY;
+            if (stepY !== 0 && !hitsObstacle(this, player.x, nextY)) {
+                player.y = nextY;
+            }
+        }
 
         this.animationElapsed += delta;
         if (this.animationElapsed >= 95) {
