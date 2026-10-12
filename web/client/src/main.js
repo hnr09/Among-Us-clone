@@ -192,7 +192,7 @@ function update(time, delta) {
 
         if (moveX !== 0) {
             player.x += moveX;
-            const hitX = firstOverlappingObstacle(this, player.x, player.y);
+            const hitX = firstOverlappingObstacle(this, player.x, player.y, player.body.width, player.body.height);
             if (hitX) {
                 if (moveX > 0) player.x = hitX.x - player.body.width;
                 else player.x = hitX.x + hitX.width;
@@ -352,12 +352,10 @@ function renderCollisionDebug(scene) {
     }
 }
 
-function firstOverlappingObstacle(scene, x, y) {
+function firstOverlappingObstacle(scene, x, y, width, height) {
     // pygame.sprite.spritecollide() checks the Player rect against the
     // invisible Obstacle rects in group order. The original Player rect is
     // image.get_rect() at its top-left position, with the image's native size.
-    const width = scene.players.get(playerId)?.body.width || 0;
-    const height = scene.players.get(playerId)?.body.height || 0;
     for (const rect of scene.obstacles) {
         if (
             x + width > rect.x &&
