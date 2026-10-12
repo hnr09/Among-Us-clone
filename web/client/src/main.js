@@ -70,8 +70,11 @@ function create() {
 
     this.keys = this.input.keyboard.addKeys({
         up: "W", down: "S", left: "A", right: "D",
-        arrowUp: "UP", arrowDown: "DOWN", arrowLeft: "LEFT", arrowRight: "RIGHT"
+        arrowUp: "UP", arrowDown: "DOWN", arrowLeft: "LEFT", arrowRight: "RIGHT",
+        debug: "H"
     });
+    this.showCollisionDebug = false;
+    this.debugGraphics = this.add.graphics().setDepth(50000);
 
     this.statusText = this.add.text(18, 16, "", {
         fontFamily: "Arial",
@@ -82,7 +85,7 @@ function create() {
         lineSpacing: 3
     }).setScrollFactor(0).setDepth(100000);
 
-    this.helpText = this.add.text(18, 112, "이동: WASD / 방향키", {
+    this.helpText = this.add.text(18, 112, "이동: WASD / 방향키   |   H: 히트박스 보기", {
         fontFamily: "Arial",
         fontSize: "16px",
         color: "#ffffff",
@@ -151,6 +154,10 @@ function create() {
 }
 
 function update(time, delta) {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.debug)) {
+        this.showCollisionDebug = !this.showCollisionDebug;
+    }
+    renderCollisionDebug(this);
     if (playerId === null || !this.players) return;
     const player = this.players.get(playerId);
     if (!player) return;
@@ -299,10 +306,13 @@ async function loadOriginalMapColliders(scene) {
             "medbay_comp", "engines", "reactor", "security_room_comp",
             "admin_btn1", "admin_btn2"
         ]);
-        const solidObjects = Array.from(obstaclesGroup.getElementsByTagName("object"))
+        // Use the exact rectangular obstacle coordinates from the original
+        // game's TMX object group. Keep rendering separate from collision data:
+        // this map's Props/Walls tile layers are empty, so those object boxes
+        // must not be treated as image crops.
+        scene.obstacles = Array.from(obstaclesGroup.getElementsByTagName("object"))
             .filter((object) => solidNames.has((object.getAttribute("name") || "").toLowerCase()))
             .map((object) => ({
-                id: Number(object.getAttribute("id") || 0),
                 name: (object.getAttribute("name") || "").toLowerCase(),
                 x: Number(object.getAttribute("x") || 0),
                 y: Number(object.getAttribute("y") || 0),
@@ -310,21 +320,6 @@ async function loadOriginalMapColliders(scene) {
                 height: Number(object.getAttribute("height") || 0)
             }))
             .filter((rect) => rect.width > 0 && rect.height > 0);
-
-        scene.obstacles = solidObjects.map(({ x, y, width, height }) => ({ x, y, width, height }));
-
-        // The original map PNG is flattened, while TMX Props/Walls tile layers
-        // are empty. Reuse pixels from that exact map image as thin horizontal
-        // slices inside the original solid-object rectangles. Sorting each slice
-        // by its lower edge lets objects cover characters behind them without
-        // changing the map art or the collision rectangles.
-        try {
-            scene.occlusionCount = createOcclusionSlices(scene, solidObjects);
-        } catch (occlusionError) {
-            console.error("Could not create map object occlusion slices:", occlusionError);
-            scene.occlusionError = true;
-            scene.occlusionCount = 0;
-        }
 
         scene.collidersReady = true;
         updateStatus(scene);
@@ -335,51 +330,26 @@ async function loadOriginalMapColliders(scene) {
     }
 }
 
-function createOcclusionSlices(scene, objects) {
-    const source = scene.textures.get("map").getSourceImage();
-    if (!source) throw new Error("Original map image is unavailable");
+function renderCollisionDebug(scene) {
+    if (!scene.debugGraphics) return;
+    const graphics = scene.debugGraphics;
+    graphics.clear();
+    if (!scene.showCollisionDebug) return;
 
-    let sliceCount = 0;
-    const sliceHeight = 32;
-
-    for (const object of objects) {
-        const x = object.x;
-        const y = object.y;
-        const width = object.width;
-        const height = object.height;
-        const canvasWidth = Math.max(1, Math.ceil(width));
-
-        // One slice per tile-height band means a tall wall can be behind a
-        // character near its top and in front of the same character near its base.
-        for (let offsetY = 0, band = 0; offsetY < height; offsetY += sliceHeight, band++) {
-            const bandHeight = Math.min(sliceHeight, height - offsetY);
-            const canvasHeight = Math.max(1, Math.ceil(bandHeight));
-            const key = "map-occlusion-" + object.id + "-" + band;
-
-            if (scene.textures.exists(key)) continue;
-
-            const texture = scene.textures.createCanvas(key, canvasWidth, canvasHeight);
-            if (!texture) continue;
-
-            const context = texture.getContext();
-            context.clearRect(0, 0, canvasWidth, canvasHeight);
-            context.drawImage(
-                source,
-                x, y + offsetY, width, bandHeight,
-                0, 0, width, bandHeight
-            );
-            texture.refresh();
-
-            scene.add.image(x, y + offsetY, key)
-                .setOrigin(0, 0)
-                .setDisplaySize(width, bandHeight)
-                .setDepth(y + offsetY + bandHeight + 0.01);
-
-            sliceCount++;
-        }
+    // Red: original map's solid object rectangles.
+    graphics.lineStyle(2, 0xff3b30, 0.95);
+    for (const rect of scene.obstacles || []) {
+        graphics.strokeRect(rect.x, rect.y, rect.width, rect.height);
     }
 
-    return sliceCount;
+    // Cyan: the current player collision box used by hitsObstacle().
+    const player = playerId !== null && scene.players ? scene.players.get(playerId) : null;
+    if (player) {
+        graphics.lineStyle(2, 0x00e5ff, 1);
+        graphics.strokeRect(player.x - 14, player.y - 18, 28, 40);
+        graphics.fillStyle(0x00e5ff, 0.12);
+        graphics.fillRect(player.x - 14, player.y - 18, 28, 40);
+    }
 }
 
 function hitsObstacle(scene, x, y) {
