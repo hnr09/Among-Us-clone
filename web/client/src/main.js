@@ -2,8 +2,6 @@ const SERVER_URL = window.location.origin;
 const MAP_WIDTH = 5792;
 const MAP_HEIGHT = 3168;
 const PLAYER_SPEED = 400; // Original settings.py: PLAYER_SPEED = 400
-const PLAYER_SCALE_WIDTH = 48;
-const PLAYER_SCALE_HEIGHT = 62;
 const FRAME_NUMBERS = [1, 4, 7, 10, 13, 16];
 const COLORS = ["Red", "Blue", "Green", "Orange", "Yellow"];
 const COLOR_PREFIX = {
@@ -136,7 +134,7 @@ function create() {
             const color = COLORS.includes(row[10]) ? row[10] : colorForId(id);
             const player = ensurePlayer(this, id, x, y, color, false);
             player.setPosition(x, y);
-            player.setDepth(y + PLAYER_SCALE_HEIGHT * (1 - 0.62));
+            player.setDepth(y + player.body.height);
             player.playerAlive = row[3] !== false;
             player.setAlpha(player.playerAlive ? 1 : 0.45);
         }
@@ -185,32 +183,31 @@ function update(time, delta) {
             this.lastDirection = dy < 0 ? "up" : "down";
         }
 
-        // Keep the original PLAYER_SPEED (400), but clamp long frame times so
-        // a lag spike cannot teleport the player through a wall.
-        const distance = PLAYER_SPEED * (Math.min(Math.max(delta, 0), 50) / 1000);
+        // Mirror sprites.py: Player.update() applies the full frame movement,
+        // then resolves X and Y collisions separately against the first
+        // overlapping obstacle, snapping the player to that rectangle's edge.
+        const distance = PLAYER_SPEED * (Math.max(delta, 0) / 1000);
         const moveX = dx * distance;
         const moveY = dy * distance;
-        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(moveX), Math.abs(moveY)) / 3));
-        const stepX = moveX / steps;
-        const stepY = moveY / steps;
 
-        // Resolve axes separately to preserve sliding along walls.
-        for (let i = 0; i < steps; i++) {
-            if (stepX !== 0) {
-                const nextX = player.x + stepX;
-                if (!hitsObstacle(this, nextX, player.y)) {
-                    player.x = nextX;
-                    didMove = true;
-                }
+        if (moveX !== 0) {
+            player.x += moveX;
+            const hitX = firstOverlappingObstacle(this, player.x, player.y);
+            if (hitX) {
+                if (moveX > 0) player.x = hitX.x - player.body.width;
+                else player.x = hitX.x + hitX.width;
             }
+            didMove = true;
+        }
 
-            if (stepY !== 0) {
-                const nextY = player.y + stepY;
-                if (!hitsObstacle(this, player.x, nextY)) {
-                    player.y = nextY;
-                    didMove = true;
-                }
+        if (moveY !== 0) {
+            player.y += moveY;
+            const hitY = firstOverlappingObstacle(this, player.x, player.y);
+            if (hitY) {
+                if (moveY > 0) player.y = hitY.y - player.body.height;
+                else player.y = hitY.y + hitY.height;
             }
+            didMove = true;
         }
     }
 
@@ -229,7 +226,7 @@ function update(time, delta) {
 
     player.setTexture(textureKey(player.playerColor, this.lastDirection, this.animationFrame));
     // Sort by the feet, not the sprite center, for correct top-down depth.
-    player.setDepth(player.y + PLAYER_SCALE_HEIGHT * (1 - 0.62));
+    player.setDepth(player.y + player.body.height);
 
     if (socket && socket.connected && time - lastSentAt >= 50) {
         lastSentAt = time;
@@ -251,14 +248,17 @@ function ensurePlayer(scene, id, x, y, color, local) {
     if (!player) {
         const initialColor = COLORS.includes(color) ? color : colorForId(id);
         player = scene.physics.add.image(x, y, textureKey(initialColor, "down", 0));
-        player.setDisplaySize(PLAYER_SCALE_WIDTH, PLAYER_SCALE_HEIGHT);
-        player.setOrigin(0.5, 0.62);
+        // Original sprites.py uses image.get_rect() without resizing and stores
+        // pos as the rectangle's top-left, so keep native PNG dimensions and
+        // top-left coordinates instead of a custom centered 28x40 hitbox.
+        player.setOrigin(0, 0);
         player.setDepth(y);
         player.playerId = id;
         player.playerColor = initialColor;
         player.playerAlive = true;
         player.isLocalPlayer = local;
-        player.body.setSize(28, 40);
+        const source = player.texture.getSourceImage();
+        player.body.setSize(source.width, source.height);
         player.body.setAllowGravity(false);
         player.body.setImmovable(true);
         scene.players.set(id, player);
@@ -346,31 +346,27 @@ function renderCollisionDebug(scene) {
     const player = playerId !== null && scene.players ? scene.players.get(playerId) : null;
     if (player) {
         graphics.lineStyle(2, 0x00e5ff, 1);
-        graphics.strokeRect(player.x - 14, player.y - 18, 28, 40);
+        graphics.strokeRect(player.x, player.y, player.body.width, player.body.height);
         graphics.fillStyle(0x00e5ff, 0.12);
-        graphics.fillRect(player.x - 14, player.y - 18, 28, 40);
+        graphics.fillRect(player.x, player.y, player.body.width, player.body.height);
     }
 }
 
-function hitsObstacle(scene, x, y) {
-    // Match the enlarged character sprite. The collision box is biased down
-    // toward the feet because the sprite uses origin.y = 0.62.
-    const halfWidth = 14;
-    const top = y - 18;
-    const bottom = y + 22;
-    const left = x - halfWidth;
-    const right = x + halfWidth;
-
-    if (left < 0 || top < 0 || right > MAP_WIDTH || bottom > MAP_HEIGHT) return true;
+function firstOverlappingObstacle(scene, x, y) {
+    // pygame.sprite.spritecollide() checks the Player rect against the
+    // invisible Obstacle rects in group order. The original Player rect is
+    // image.get_rect() at its top-left position, with the image's native size.
+    const width = scene.players.get(playerId)?.body.width || 0;
+    const height = scene.players.get(playerId)?.body.height || 0;
     for (const rect of scene.obstacles) {
         if (
-            right > rect.x &&
-            left < rect.x + rect.width &&
-            bottom > rect.y &&
-            top < rect.y + rect.height
-        ) return true;
+            x + width > rect.x &&
+            x < rect.x + rect.width &&
+            y + height > rect.y &&
+            y < rect.y + rect.height
+        ) return rect;
     }
-    return false;
+    return null;
 }
 
 function updateStatus(scene) {
