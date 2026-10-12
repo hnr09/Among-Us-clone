@@ -2,8 +2,8 @@ const SERVER_URL = window.location.origin;
 const MAP_WIDTH = 5792;
 const MAP_HEIGHT = 3168;
 const PLAYER_SPEED = 400; // Original settings.py: PLAYER_SPEED = 400
-const PLAYER_SCALE_WIDTH = 36;
-const PLAYER_SCALE_HEIGHT = 46;
+const PLAYER_SCALE_WIDTH = 48;
+const PLAYER_SCALE_HEIGHT = 62;
 const FRAME_NUMBERS = [1, 4, 7, 10, 13, 16];
 const COLORS = ["Red", "Blue", "Green", "Orange", "Yellow"];
 const COLOR_PREFIX = {
@@ -235,7 +235,7 @@ function ensurePlayer(scene, id, x, y, color, local) {
         player.playerColor = initialColor;
         player.playerAlive = true;
         player.isLocalPlayer = local;
-        player.body.setSize(22, 27);
+        player.body.setSize(28, 40);
         player.body.setAllowGravity(false);
         player.body.setImmovable(true);
         scene.players.set(id, player);
@@ -277,7 +277,12 @@ async function loadOriginalMapColliders(scene) {
 
         // Keep the original TMX map. Include singular "wall" and unnamed
         // rectangle objects too; these were omitted by the first web port.
-        const solidNames = new Set(["walls", "wall", "tables", "props"]);
+        // Include named machinery from the original TMX too. These objects are not
+        // named "walls", but the generator/engine/reactor artwork should block movement.
+        const solidNames = new Set([
+            "walls", "wall", "tables", "props",
+            "generator", "generator_circuit", "engines", "reactor"
+        ]);
         scene.obstacles = Array.from(obstaclesGroup.getElementsByTagName("object"))
             .filter((object) => {
                 const name = (object.getAttribute("name") || "").toLowerCase();
@@ -301,12 +306,13 @@ async function loadOriginalMapColliders(scene) {
 }
 
 function hitsObstacle(scene, x, y) {
-    const halfWidth = 11;
-    const halfHeight = 14;
+    // Match the enlarged character sprite. The collision box is biased down
+    // toward the feet because the sprite uses origin.y = 0.62.
+    const halfWidth = 14;
+    const top = y - 18;
+    const bottom = y + 22;
     const left = x - halfWidth;
     const right = x + halfWidth;
-    const top = y - halfHeight;
-    const bottom = y + halfHeight;
 
     if (left < 0 || top < 0 || right > MAP_WIDTH || bottom > MAP_HEIGHT) return true;
     for (const rect of scene.obstacles) {
