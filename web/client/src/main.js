@@ -69,7 +69,7 @@ function create() {
     this.keys = this.input.keyboard.addKeys({
         up: "W", down: "S", left: "A", right: "D",
         arrowUp: "UP", arrowDown: "DOWN", arrowLeft: "LEFT", arrowRight: "RIGHT",
-        debug: "H"
+        debug: "H", interact: "E", cancel: "ESC"
     });
     this.showCollisionDebug = false;
     this.debugGraphics = this.add.graphics().setDepth(50000);
@@ -83,13 +83,34 @@ function create() {
         lineSpacing: 3
     }).setScrollFactor(0).setDepth(100000);
 
-    this.helpText = this.add.text(18, 112, "이동: WASD / 방향키   |   H: 히트박스 보기", {
+    this.helpText = this.add.text(18, 112, "이동: WASD / 방향키   |   E: 작업   |   H: 히트박스 보기", {
         fontFamily: "Arial",
         fontSize: "16px",
         color: "#ffffff",
         backgroundColor: "rgba(0, 0, 0, 0.55)",
         padding: { left: 8, right: 8, top: 5, bottom: 5 }
     }).setScrollFactor(0).setDepth(100000);
+
+    this.interactionText = this.add.text(640, 650, "", {
+        fontFamily: "Arial", fontSize: "20px", color: "#ffffff",
+        backgroundColor: "rgba(0, 0, 0, 0.82)",
+        padding: { left: 14, right: 14, top: 9, bottom: 9 }, align: "center"
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(100001).setVisible(false);
+    this.taskPanelBg = this.add.rectangle(640, 360, 560, 300, 0x101820, 0.97)
+        .setStrokeStyle(3, 0x55ddee, 1).setScrollFactor(0).setDepth(100002).setVisible(false);
+    this.taskPanelTitle = this.add.text(640, 260, "", {
+        fontFamily: "Arial", fontSize: "28px", color: "#ffffff", fontStyle: "bold",
+        align: "center", wordWrap: { width: 490 }
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(100003).setVisible(false);
+    this.taskPanelBody = this.add.text(640, 355, "", {
+        fontFamily: "Arial", fontSize: "20px", color: "#d6e2ea",
+        align: "center", wordWrap: { width: 480 }, lineSpacing: 8
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(100003).setVisible(false);
+    this.taskPanelClose = this.add.text(640, 475, "ESC 키를 눌러 닫기", {
+        fontFamily: "Arial", fontSize: "18px", color: "#7de8f7", align: "center"
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(100003).setVisible(false);
+    this.activeTaskStation = null;
+    this.taskPanelOpen = false;
 
     updateStatus(this);
     loadOriginalMapColliders(this);
@@ -159,6 +180,18 @@ function update(time, delta) {
     if (playerId === null || !this.players) return;
     const player = this.players.get(playerId);
     if (!player) return;
+
+    if (this.taskPanelOpen) {
+        if (Phaser.Input.Keyboard.JustDown(this.keys.cancel)) closeTaskPanel(this);
+        return;
+    }
+    const nearbyStation = findNearbyTaskStation(this, player);
+    if (nearbyStation) this.interactionText.setText("E  작업하기: " + nearbyStation.title).setVisible(true);
+    else this.interactionText.setVisible(false);
+    if (nearbyStation && Phaser.Input.Keyboard.JustDown(this.keys.interact)) {
+        openTaskPanel(this, nearbyStation);
+        return;
+    }
 
     let dx = 0;
     let dy = 0;
@@ -313,6 +346,21 @@ async function loadOriginalMapColliders(scene) {
             }))
             .filter((rect) => rect.width > 0 && rect.height > 0);
 
+        const stationNames = new Set([
+            "wifi", "generator_circuit", "laptop", "reactor_btn",
+            "destroy_asteroids", "lower_engine", "upper_engine", "exit_ship"
+        ]);
+        scene.taskStations = Array.from(obstaclesGroup.getElementsByTagName("object"))
+            .filter((object) => stationNames.has((object.getAttribute("name") || "").toLowerCase()))
+            .map((object) => {
+                const name = (object.getAttribute("name") || "").toLowerCase();
+                const x = Number(object.getAttribute("x") || 0);
+                const y = Number(object.getAttribute("y") || 0);
+                const width = Number(object.getAttribute("width") || 0);
+                const height = Number(object.getAttribute("height") || 0);
+                return { name, x, y, width, height, cx: x + width / 2, cy: y + height / 2, title: taskTitle(name) };
+            }).filter((station) => station.width > 0 && station.height > 0);
+
         scene.collidersReady = true;
         updateStatus(scene);
     } catch (error) {
@@ -320,6 +368,52 @@ async function loadOriginalMapColliders(scene) {
         scene.collisionError = true;
         updateStatus(scene);
     }
+}
+
+function taskTitle(name) {
+    const titles = { wifi: "통신 장치 재부팅", generator_circuit: "전력 분배", laptop: "관리실 콘솔", reactor_btn: "원자로 제어", destroy_asteroids: "소행성 제거", lower_engine: "하부 엔진", upper_engine: "상부 엔진", exit_ship: "우주선 출구" };
+    return titles[name] || "작업";
+}
+
+function findNearbyTaskStation(scene, player) {
+    let nearest = null;
+    let nearestDistance = 100;
+    const px = player.x + player.displayWidth / 2;
+    const py = player.y + player.displayHeight / 2;
+    for (const station of scene.taskStations || []) {
+        const distance = Math.hypot(px - station.cx, py - station.cy);
+        if (distance < nearestDistance) { nearest = station; nearestDistance = distance; }
+    }
+    return nearest;
+}
+
+function openTaskPanel(scene, station) {
+    scene.taskPanelOpen = true;
+    scene.activeTaskStation = station;
+    scene.interactionText.setVisible(false);
+    scene.taskPanelTitle.setText(station.title).setVisible(true);
+    const details = {
+        wifi: "통신 장치에 접근했어.\n다음 단계에서 재부팅 미니게임을 연결할 거야.",
+        generator_circuit: "전력 분배 장치에 접근했어.\n다음 단계에서 전력 연결 미니게임을 연결할 거야.",
+        laptop: "관리실 콘솔에 접근했어.\n다음 단계에서 관리실 기능을 연결할 거야.",
+        reactor_btn: "원자로 제어 장치에 접근했어.\n다음 단계에서 원자로 작업을 연결할 거야.",
+        destroy_asteroids: "소행성 관측 장치에 접근했어.\n다음 단계에서 조준 미니게임을 연결할 거야.",
+        lower_engine: "하부 엔진 작업 지점에 접근했어.\n다음 단계에서 엔진 작업을 연결할 거야.",
+        upper_engine: "상부 엔진 작업 지점에 접근했어.\n다음 단계에서 엔진 작업을 연결할 거야.",
+        exit_ship: "출구 지점이야.\n출구 기능은 작업 시스템 이후에 연결할 거야."
+    };
+    scene.taskPanelBody.setText(details[station.name] || "작업 지점이야.").setVisible(true);
+    scene.taskPanelBg.setVisible(true);
+    scene.taskPanelClose.setVisible(true);
+}
+
+function closeTaskPanel(scene) {
+    scene.taskPanelOpen = false;
+    scene.activeTaskStation = null;
+    scene.taskPanelBg.setVisible(false);
+    scene.taskPanelTitle.setVisible(false);
+    scene.taskPanelBody.setVisible(false);
+    scene.taskPanelClose.setVisible(false);
 }
 
 function renderCollisionDebug(scene) {
